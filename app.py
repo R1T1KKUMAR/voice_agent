@@ -1,48 +1,310 @@
 import streamlit as st
-from streamlit_mic_recorder import mic_recorder
+from audiorecorder import audiorecorder
+from groq import Groq
+from dotenv import load_dotenv
 import speech_recognition as sr
-import google.generativeai as genai
+import edge_tts
+import asyncio
+import tempfile
+import os
 
-# Gemini
-genai.configure(api_key="YOUR_GEMINI_API_KEY")
-model = genai.GenerativeModel("gemini-2.5-flash")
+# =====================================
+# CONFIG
+# =====================================
 
-st.title("🤖 Hindi Voice Assistant")
+load_dotenv()
+print("GROQ_API_KEY =", os.getenv("GROQ_API_KEY"))
 
-audio = mic_recorder(
-    start_prompt="🎤 Start Recording",
-    stop_prompt="⏹️ Stop Recording",
-    key="recorder"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# if not GROQ_API_KEY:
+#     st.error("GROQ_API_KEY not found in .env file")
+#     st.stop()
+
+client = Groq(api_key=GROQ_API_KEY)
+
+# =====================================
+# PAGE CONFIG
+# =====================================
+
+st.set_page_config(
+    page_title="Hindi Voice Assistant",
+    page_icon="🤖",
+    layout="wide"
 )
 
-if audio:
-    st.success("Audio recorded!")
+# =====================================
+# CUSTOM CSS
+# =====================================
 
-    recognizer = sr.Recognizer()
+st.markdown("""
+<style>
+.main {
+    padding-top: 1rem;
+}
+</style>
+""", unsafe_allow_html=True)
 
-    with open("temp.wav", "wb") as f:
-        f.write(audio["bytes"])
+# =====================================
+# TITLE
+# =====================================
 
-    with sr.AudioFile("temp.wav") as source:
-        audio_data = recognizer.record(source)
+st.title("🤖 Hindi Voice Assistant")
+st.caption("Groq + Hindi + Hinglish + Voice")
+
+# =====================================
+# MEMORY
+# =====================================
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# =====================================
+# SIDEBAR
+# =====================================
+
+with st.sidebar:
+
+    st.header("⚙️ Settings")
+
+    voice_choice = st.selectbox(
+        "Voice",
+        ["Male", "Female"]
+    )
+
+    if st.button("🗑 Clear Chat"):
+        st.session_state.chat_history = []
+        st.rerun()
+
+    st.divider()
+
+    st.subheader("Conversation History")
+
+    for msg in reversed(
+        st.session_state.chat_history[-10:]
+    ):
+        st.write(
+            f"**{msg['role']}**: {msg['content']}"
+        )
+
+# =====================================
+# VOICE CONFIG
+# =====================================
+
+voice_name = (
+    "hi-IN-MadhurNeural"
+    if voice_choice == "Male"
+    else "hi-IN-SwaraNeural"
+)
+
+# =====================================
+# TEXT TO SPEECH
+# =====================================
+
+async def generate_voice(text):
+
+    output_file = "response.mp3"
+
+    communicate = edge_tts.Communicate(
+        text=text,
+        voice=voice_name
+    )
+
+    await communicate.save(output_file)
+
+    return output_file
+
+# =====================================
+# AI RESPONSE
+# =====================================
+
+def ask_ai(user_text):
+
+    history = ""
+
+    for item in st.session_state.chat_history:
+
+        history += (
+            f"{item['role']}: "
+            f"{item['content']}\n"
+        )
+
+    prompt = f"""
+आप एक Smart Indian Voice AI Assistant हैं।
+
+Rules:
+- Hindi या Hinglish में जवाब दें
+- 2-4 वाक्यों में जवाब दें
+- बहुत लंबे उत्तर न दें
+- Friendly और natural रहें
+- User का नाम Ritik है
+- Programming questions के लिए examples दें
+
+Conversation History:
+{history}
+
+User:
+{user_text}
+"""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    return response.choices[0].message.content
+
+# =====================================
+# VOICE INPUT
+# =====================================
+
+st.subheader("🎤 Voice Input")
+
+audio = audiorecorder(
+    "🎙️ Start Recording",
+    "⏹️ Stop Recording"
+)
+
+if len(audio) > 0:
 
     try:
-        text = recognizer.recognize_google(
+
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".wav"
+        ) as temp_audio:
+
+            audio.export(
+                temp_audio.name,
+                format="wav"
+            )
+
+            audio_path = temp_audio.name
+
+        recognizer = sr.Recognizer()
+
+        with sr.AudioFile(audio_path) as source:
+
+            audio_data = recognizer.record(
+                source
+            )
+
+        user_text = recognizer.recognize_google(
             audio_data,
             language="hi-IN"
         )
 
-        st.write("### 👤 You")
-        st.write(text)
+        st.chat_message(
+            "user"
+        ).write(user_text)
 
-        response = model.generate_content(
-            f"Reply in Hindi/Hinglish: {text}"
+        answer = ask_ai(user_text)
+
+        st.chat_message(
+            "assistant"
+        ).write(answer)
+
+        st.session_state.chat_history.append(
+            {
+                "role": "User",
+                "content": user_text
+            }
         )
 
-        answer = response.text
+        st.session_state.chat_history.append(
+            {
+                "role": "Assistant",
+                "content": answer
+            }
+        )
 
-        st.write("### 🤖 AI")
-        st.write(answer)
+        voice_file = asyncio.run(
+            generate_voice(answer)
+        )
+
+        with open(
+            voice_file,
+            "rb"
+        ) as f:
+
+            audio_bytes = f.read()
+
+        st.audio(
+            audio_bytes,
+            format="audio/mp3",
+            autoplay=True
+        )
 
     except Exception as e:
-        st.error(str(e))
+
+        st.error(
+            f"Error: {str(e)}"
+        )
+
+# =====================================
+# TEXT CHAT
+# =====================================
+
+st.divider()
+
+st.subheader("💬 Text Chat")
+
+text_query = st.chat_input(
+    "Ask anything..."
+)
+
+if text_query:
+
+    try:
+
+        st.chat_message(
+            "user"
+        ).write(text_query)
+
+        answer = ask_ai(text_query)
+
+        st.chat_message(
+            "assistant"
+        ).write(answer)
+
+        st.session_state.chat_history.append(
+            {
+                "role": "User",
+                "content": text_query
+            }
+        )
+
+        st.session_state.chat_history.append(
+            {
+                "role": "Assistant",
+                "content": answer
+            }
+        )
+
+        voice_file = asyncio.run(
+            generate_voice(answer)
+        )
+
+        with open(
+            voice_file,
+            "rb"
+        ) as f:
+
+            audio_bytes = f.read()
+
+        st.audio(
+            audio_bytes,
+            format="audio/mp3",
+            autoplay=True
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Error: {str(e)}"
+        )
