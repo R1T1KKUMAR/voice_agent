@@ -1,0 +1,66 @@
+# Virtual Environment
+
+venv/
+.env/
+
+# Environment Variables
+
+.env
+.env.local
+
+# Python
+
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# Build Files
+
+build/
+dist/
+*.egg-info/
+
+# IDE
+
+.vscode/
+.idea/
+
+# Streamlit
+
+.streamlit/secrets.toml
+
+# Audio Files
+
+*.mp3
+*.wav
+*.ogg
+
+# Logs
+
+*.log
+
+# OS Files
+
+.DS_Store
+Thumbs.db
+
+# Temporary Files
+
+temp.wav
+response.mp3
+
+# Jupyter
+
+.ipynb_checkpoints/
+
+# Cache
+
+.cache/
+.pytest_cache/
+
+# Gemini Keys
+
+config.py
+secrets.py
